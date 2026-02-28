@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Search, ArrowRight, Loader2, Link as LinkIcon, Globe, History, X, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -120,7 +121,7 @@ export default function App() {
       const msg = error instanceof Error ? error.message : "";
       const isQuotaOrRateLimit = /429|quota|rate limit|rate-limit/i.test(msg);
       const displayMessage = isQuotaOrRateLimit
-        ? "웹 검색(Google Search) 할당량을 초과했거나 요청 제한에 걸렸습니다. 잠시 후 다시 시도하거나, 웹 검색을 OFF한 상태로 사용해 보세요. 자세한 사용량은 Google AI Studio에서 확인할 수 있습니다."
+        ? "웹 검색(Google Search) 할당량을 초과했거나 요청 제한에 걸렸습니다. 잠시 후 다시 시도하거나, 웹 검색을 OFF한 상태로 사용해 보세요."
         : "검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
       setMessages(prev => [...prev, {
         role: 'model',
@@ -241,7 +242,7 @@ export default function App() {
                     <div className="w-full space-y-4 sm:space-y-8">
                       <div className="border border-[#141414] rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-white shadow-[20px_20px_0px_0px_rgba(20,20,20,0.05)] relative">
                         <div className="markdown-body prose prose-slate max-w-none">
-                          <Markdown>{msg.content}</Markdown>
+                          <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
                         </div>
                         
                         {!msg.isWebSearch && idx === messages.length - 1 && !isLoading && (

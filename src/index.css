@@ -29,6 +29,7 @@
 
 .markdown-body {
   @apply text-[#141414] leading-relaxed opacity-90 break-words;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 .markdown-body pre, .markdown-body code {
   @apply overflow-x-auto max-w-full;
@@ -48,4 +49,25 @@
 
 .markdown-body a {
   @apply text-[#141414] underline underline-offset-2 hover:opacity-80;
+}
+
+/* 표: GFM 테이블 정상 렌더링 + 숫자용 폰트 */
+.markdown-body table {
+  @apply w-full border-collapse my-4 text-left;
+}
+.markdown-body thead {
+  @apply border-b-2 border-[#141414]/20;
+}
+.markdown-body th {
+  @apply py-3 px-4 font-medium font-sans text-[#141414] bg-[#141414]/5;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+.markdown-body td {
+  @apply py-3 px-4 border-b border-[#141414]/10;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+.markdown-body tbody tr:hover {
+  @apply bg-[#141414]/[0.03];
 }
