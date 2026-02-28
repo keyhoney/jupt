@@ -117,9 +117,14 @@ export default function App() {
       setMessages((prev) => [...prev, modelMessage]);
     } catch (error) {
       console.error("Search error:", error);
+      const msg = error instanceof Error ? error.message : "";
+      const isQuotaOrRateLimit = /429|quota|rate limit|rate-limit/i.test(msg);
+      const displayMessage = isQuotaOrRateLimit
+        ? "웹 검색(Google Search) 할당량을 초과했거나 요청 제한에 걸렸습니다. 잠시 후 다시 시도하거나, 웹 검색을 OFF한 상태로 사용해 보세요. 자세한 사용량은 Google AI Studio에서 확인할 수 있습니다."
+        : "검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
       setMessages(prev => [...prev, {
         role: 'model',
-        content: "검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        content: displayMessage,
         isWebSearch: useWebSearch,
       }]);
     } finally {
