@@ -1,13 +1,36 @@
 import { useState, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Search, ArrowRight, Loader2, Link as LinkIcon, Globe, History, X, Plus, MessageSquare } from 'lucide-react';
+import remarkMath from 'remark-math';
+import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
+import mermaid from 'mermaid';
+import { Search, ArrowRight, Loader2, Link as LinkIcon, Globe, History, X, Plus, MessageSquare, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+mermaid.initialize({ startOnLoad: false });
+
+function MermaidBlock({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const raw = String(children).trim();
+  useEffect(() => {
+    if (!ref.current || !raw) return;
+    ref.current.textContent = raw;
+    mermaid.run({ nodes: [ref.current] }).catch(() => {});
+  }, [raw]);
+  return <div ref={ref} className="mermaid my-4" />;
+}
+
+function CodeBlock({ node, inline, className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { node?: unknown; inline?: boolean }) {
+  const match = /language-(\w+)/.exec(className || '');
+  if (!inline && match && match[1] === 'mermaid') return <MermaidBlock>{children}</MermaidBlock>;
+  return <code className={className} {...props}>{children}</code>;
 }
 
 interface Source {
@@ -36,7 +59,18 @@ export default function App() {
   const [history, setHistory] = useState<ChatSession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+  const [copyToast, setCopyToast] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const copyAnswer = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyToast(true);
+      setTimeout(() => setCopyToast(false), 2000);
+    } catch {
+      setCopyToast(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -72,21 +106,97 @@ export default function App() {
 
     const useWebSearch = forceWebSearch !== undefined ? forceWebSearch : isWebSearchEnabled;
     const userMessage: Message = { role: 'user', content: searchQuery };
-    
+    const historyForRequest = messages.map((msg) => ({ role: msg.role, content: msg.content }));
+
     setMessages(prev => [...prev, userMessage]);
     setQuery('');
     setIsLoading(true);
 
     try {
+      const useStreaming = !useWebSearch;
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: searchQuery,
           useWebSearch,
-          history: messages.map((msg) => ({ role: msg.role, content: msg.content })),
+          history: historyForRequest,
+          ...(useStreaming ? { stream: true } : {}),
         }),
       });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (useStreaming && contentType.includes("application/x-ndjson") && res.ok && res.body) {
+        const placeholder: Message = { role: "model", content: "", isWebSearch: false };
+        setMessages((prev) => [...prev, placeholder]);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let sources: Source[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const data = JSON.parse(trimmed) as { type: string; text?: string; sources?: Source[] };
+              if (data.type === "delta" && typeof data.text === "string") {
+                setMessages((prev) => {
+                  const next = prev.slice(0, -1);
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "model") next.push({ ...last, content: last.content + data.text });
+                  else next.push(last);
+                  return next;
+                });
+              } else if (data.type === "sources" && Array.isArray(data.sources)) {
+                sources = data.sources;
+              } else if (data.type === "done") {
+                setMessages((prev) => {
+                  const next = prev.slice(0, -1);
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "model") next.push({ ...last, sources });
+                  else next.push(last);
+                  return next;
+                });
+              }
+            } catch {
+              // skip malformed line
+            }
+          }
+        }
+        if (buffer.trim()) {
+          try {
+            const data = JSON.parse(buffer) as { type: string; text?: string; sources?: Source[] };
+            if (data.type === "delta" && typeof data.text === "string") {
+              setMessages((prev) => {
+                const next = prev.slice(0, -1);
+                const last = prev[prev.length - 1];
+                if (last?.role === "model") next.push({ ...last, content: last.content + data.text });
+                else next.push(last);
+                return next;
+              });
+            }
+            if (data.type === "sources" && Array.isArray(data.sources)) sources = data.sources;
+            if (data.type === "done") {
+              setMessages((prev) => {
+                const next = prev.slice(0, -1);
+                const last = prev[prev.length - 1];
+                if (last?.role === "model") next.push({ ...last, sources });
+                else next.push(last);
+                return next;
+              });
+            }
+          } catch {
+            // skip
+          }
+        }
+        setIsLoading(false);
+        return;
+      }
 
       const text = await res.text();
       let data: { error?: string; answer?: string; sources?: Source[] } = {};
@@ -241,8 +351,16 @@ export default function App() {
                   ) : (
                     <div className="w-full space-y-4 sm:space-y-8">
                       <div className="border border-[#141414] rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-white shadow-[20px_20px_0px_0px_rgba(20,20,20,0.05)] relative">
-                        <div className="markdown-body prose prose-slate max-w-none">
-                          <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+                        <button
+                          type="button"
+                          onClick={() => copyAnswer(msg.content)}
+                          className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 rounded-lg border border-[#141414]/10 hover:bg-[#141414]/5 active:bg-[#141414]/10 transition-colors opacity-60 hover:opacity-100"
+                          title="답변 복사"
+                        >
+                          <Copy size={18} />
+                        </button>
+                        <div className="markdown-body prose prose-slate max-w-none pr-10">
+                          <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeHighlight, { detect: true, plainText: ['mermaid'] }], rehypeKatex]} components={{ code: CodeBlock }}>{msg.content}</Markdown>
                         </div>
                         
                         {!msg.isWebSearch && idx === messages.length - 1 && !isLoading && (
@@ -358,21 +476,37 @@ export default function App() {
             </motion.div>
           </div>
 
-          {/* Loading State */}
-          {isLoading && (
-            <div className="flex flex-col items-center justify-center py-8 sm:py-12 gap-4 sm:gap-6">
-              <div className="w-12 h-12 rounded-full bg-[#141414]/5 flex items-center justify-center">
-                <Loader2 className="animate-spin text-[#141414] opacity-60" size={24} />
+          {/* Loading skeleton (answer card shape); hide when streaming into placeholder message */}
+          {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== 'model' || messages[messages.length - 1]?.content !== '') && (
+            <div className="w-full flex flex-col gap-4">
+              <div className="border border-[#141414] rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-white shadow-[20px_20px_0px_0px_rgba(20,20,20,0.05)]">
+                <div className="space-y-3 animate-pulse">
+                  <div className="h-4 bg-[#141414]/10 rounded w-full" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[95%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[88%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[70%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[40%] mt-4" />
+                </div>
               </div>
-              <p className="font-mono text-[10px] uppercase tracking-widest opacity-40 animate-pulse">
-                Thinking...
-              </p>
             </div>
           )}
 
         </div>
       </main>
 
+      {/* Copy toast */}
+      <AnimatePresence>
+        {copyToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 rounded-xl bg-[#141414] text-[#F5F5F0] text-sm font-mono shadow-lg"
+          >
+            복사됨
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

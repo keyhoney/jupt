@@ -5,8 +5,8 @@
 
 const MODEL_DEFAULT = "gemini-3-flash-preview";
 const MODEL_WITH_WEB_SEARCH = "gemini-2.5-flash";
-const GEMINI_URL = (key: string, useWebSearch: boolean) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:generateContent?key=${key}`;
+const GEMINI_URL = (key: string, useWebSearch: boolean, stream: boolean) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:${stream ? "streamGenerateContent" : "generateContent"}?key=${key}`;
 
 export interface Env {
   GEMINI_API_KEY: string;
@@ -32,7 +32,7 @@ export const onRequestPost = async (context: Context) => {
   }
 
   type HistoryItem = { role?: "user" | "model"; content?: string };
-  let body: { query?: string; useWebSearch?: boolean; history?: HistoryItem[] };
+  let body: { query?: string; useWebSearch?: boolean; history?: HistoryItem[]; stream?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -44,6 +44,7 @@ export const onRequestPost = async (context: Context) => {
 
   const query = typeof body?.query === "string" ? body.query.trim() : "";
   const useWebSearch = Boolean(body?.useWebSearch);
+  const stream = Boolean(body?.stream);
   const history = Array.isArray(body?.history) ? body.history : [];
 
   if (!query) {
@@ -67,8 +68,95 @@ export const onRequestPost = async (context: Context) => {
     requestBody.tools = [{ google_search: {} }];
   }
 
+  const useStreaming = stream && !useWebSearch;
+  if (useStreaming) {
+    try {
+      const res = await fetch(GEMINI_URL(apiKey, useWebSearch, true), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: { message?: string } };
+        return new Response(
+          JSON.stringify({ error: err?.error?.message || res.statusText }),
+          { status: res.status, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      const encoder = new TextEncoder();
+      let buffer = "";
+      const streamBody = res.body!.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            buffer += new TextDecoder().decode(chunk, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              try {
+                const data = JSON.parse(trimmed) as {
+                  candidates?: Array<{
+                    content?: { parts?: Array<{ text?: string }> };
+                    groundingMetadata?: {
+                      groundingChunks?: Array<{ web?: { uri: string; title?: string } }>;
+                    };
+                  }>;
+                };
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (typeof text === "string" && text)
+                  controller.enqueue(encoder.encode(JSON.stringify({ type: "delta", text }) + "\n"));
+                const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+                const sources = chunks
+                  .filter((c): c is { web: { uri: string; title?: string } } => Boolean((c as { web?: unknown })?.web))
+                  .map((c) => ({ title: c.web.title || "출처", uri: c.web.uri }));
+                if (sources.length > 0)
+                  controller.enqueue(encoder.encode(JSON.stringify({ type: "sources", sources }) + "\n"));
+              } catch {
+                // skip malformed line
+              }
+            }
+          },
+          flush(controller) {
+            if (buffer.trim()) {
+              try {
+                const data = JSON.parse(buffer) as {
+                  candidates?: Array<{
+                    content?: { parts?: Array<{ text?: string }> };
+                    groundingMetadata?: { groundingChunks?: Array<{ web?: { uri: string; title?: string } }> };
+                  }>;
+                };
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (typeof text === "string" && text)
+                  controller.enqueue(encoder.encode(JSON.stringify({ type: "delta", text }) + "\n"));
+                const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+                const sources = chunks
+                  .filter((c): c is { web: { uri: string; title?: string } } => Boolean((c as { web?: unknown })?.web))
+                  .map((c) => ({ title: c.web.title || "출처", uri: c.web.uri }));
+                if (sources.length > 0)
+                  controller.enqueue(encoder.encode(JSON.stringify({ type: "sources", sources }) + "\n"));
+              } catch {
+                // skip
+              }
+            }
+            controller.enqueue(encoder.encode(JSON.stringify({ type: "done" }) + "\n"));
+          },
+        })
+      );
+      return new Response(streamBody, {
+        headers: { "Content-Type": "application/x-ndjson", "Transfer-Encoding": "chunked" },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return new Response(
+        JSON.stringify({ error: message }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }
+
   try {
-    const res = await fetch(GEMINI_URL(apiKey, useWebSearch), {
+    const res = await fetch(GEMINI_URL(apiKey, useWebSearch, false), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),

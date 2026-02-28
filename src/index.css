@@ -1,4 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap');
+@import "highlight.js/styles/github.css";
+@import "katex/dist/katex.min.css";
 @import "tailwindcss";
 
 @theme {

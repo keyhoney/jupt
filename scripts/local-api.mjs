@@ -40,8 +40,8 @@ Object.entries(devVars).forEach(([k, v]) => {
 
 const MODEL_DEFAULT = "gemini-3-flash-preview";
 const MODEL_WITH_WEB_SEARCH = "gemini-2.5-flash";
-const GEMINI_URL = (key, useWebSearch) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:generateContent?key=${key}`;
+const GEMINI_URL = (key, useWebSearch, stream = false) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:${stream ? "streamGenerateContent" : "generateContent"}?key=${key}`;
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -55,22 +55,76 @@ app.post("/api/search", async (req, res) => {
     });
   }
 
-  const { query, useWebSearch, history = [] } = req.body || {};
+  const { query, useWebSearch, history = [], stream: wantStream = false } = req.body || {};
   const q = typeof query === "string" ? query.trim() : "";
   if (!q) {
     return res.status(400).json({ error: "Missing or empty 'query'." });
   }
 
+  const useWebSearchBool = Boolean(useWebSearch);
   const contents = history
     .filter((m) => (m.role === "user" || m.role === "model") && typeof m.content === "string")
     .map((m) => ({ role: m.role, parts: [{ text: m.content }] }));
   contents.push({ role: "user", parts: [{ text: q }] });
 
   const requestBody = { contents };
-  if (useWebSearch) requestBody.tools = [{ google_search: {} }];
+  if (useWebSearchBool) requestBody.tools = [{ google_search: {} }];
+
+  const useStreaming = Boolean(wantStream) && !useWebSearchBool;
+
+  if (useStreaming) {
+    try {
+      const r = await fetch(GEMINI_URL(apiKey, useWebSearchBool, true), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      if (!r.ok) {
+        const err = await r.json();
+        return res.status(r.status).json({ error: err?.error?.message || r.statusText });
+      }
+      res.setHeader("Content-Type", "application/x-ndjson");
+      let buffer = "";
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const data = JSON.parse(trimmed);
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (typeof text === "string" && text) res.write(JSON.stringify({ type: "delta", text }) + "\n");
+            const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+            const sources = chunks.filter((c) => c.web).map((c) => ({ title: c.web.title || "출처", uri: c.web.uri }));
+            if (sources.length > 0) res.write(JSON.stringify({ type: "sources", sources }) + "\n");
+          } catch (_) {}
+        }
+      }
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (typeof text === "string" && text) res.write(JSON.stringify({ type: "delta", text }) + "\n");
+          const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+          const sources = chunks.filter((c) => c.web).map((c) => ({ title: c.web.title || "출처", uri: c.web.uri }));
+          if (sources.length > 0) res.write(JSON.stringify({ type: "sources", sources }) + "\n");
+        } catch (_) {}
+      }
+      res.write(JSON.stringify({ type: "done" }) + "\n");
+      return res.end();
+    } catch (err) {
+      return res.status(500).json({ error: err?.message || "Unknown error" });
+    }
+  }
 
   try {
-    const r = await fetch(GEMINI_URL(apiKey, Boolean(useWebSearch)), {
+    const r = await fetch(GEMINI_URL(apiKey, useWebSearchBool, false), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
