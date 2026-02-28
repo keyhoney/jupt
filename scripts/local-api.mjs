@@ -38,7 +38,7 @@ Object.entries(devVars).forEach(([k, v]) => {
   if (!process.env[k]) process.env[k] = v;
 });
 
-const GEMINI_MODEL = "gemini-flash-latest";
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_URL = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 

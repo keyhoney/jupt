@@ -3,7 +3,7 @@
  * Cloudflare 대시보드에서 GEMINI_API_KEY를 환경 변수(암호)로 설정하세요.
  */
 
-const GEMINI_MODEL = "gemini-flash-latest";
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_URL = (key: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 
