@@ -61,6 +61,7 @@ export default function App() {
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [copyToast, setCopyToast] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const copyAnswer = async (text: string) => {
     try {
@@ -77,8 +78,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    if (messages.length > 0 && messages[messages.length - 1]?.role === "user") scrollToBottom();
+  }, [messages]);
 
   const startNewChat = () => {
     if (messages.length > 0) {
@@ -101,102 +102,27 @@ export default function App() {
 
   const handleSearch = async (e?: React.FormEvent, customQuery?: string, forceWebSearch?: boolean) => {
     e?.preventDefault();
+    inputRef.current?.blur();
     const searchQuery = customQuery || query;
     if (!searchQuery.trim() || isLoading) return;
 
     const useWebSearch = forceWebSearch !== undefined ? forceWebSearch : isWebSearchEnabled;
     const userMessage: Message = { role: 'user', content: searchQuery };
-    const historyForRequest = messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
     setMessages(prev => [...prev, userMessage]);
     setQuery('');
     setIsLoading(true);
 
     try {
-      const useStreaming = !useWebSearch;
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: searchQuery,
           useWebSearch,
-          history: historyForRequest,
-          ...(useStreaming ? { stream: true } : {}),
+          history: messages.map((msg) => ({ role: msg.role, content: msg.content })),
         }),
       });
-
-      const contentType = res.headers.get("content-type") || "";
-      if (useStreaming && contentType.includes("application/x-ndjson") && res.ok && res.body) {
-        const placeholder: Message = { role: "model", content: "", isWebSearch: false };
-        setMessages((prev) => [...prev, placeholder]);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let sources: Source[] = [];
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const data = JSON.parse(trimmed) as { type: string; text?: string; sources?: Source[] };
-              if (data.type === "delta" && typeof data.text === "string") {
-                setMessages((prev) => {
-                  const next = prev.slice(0, -1);
-                  const last = prev[prev.length - 1];
-                  if (last?.role === "model") next.push({ ...last, content: last.content + data.text });
-                  else next.push(last);
-                  return next;
-                });
-              } else if (data.type === "sources" && Array.isArray(data.sources)) {
-                sources = data.sources;
-              } else if (data.type === "done") {
-                setMessages((prev) => {
-                  const next = prev.slice(0, -1);
-                  const last = prev[prev.length - 1];
-                  if (last?.role === "model") next.push({ ...last, sources });
-                  else next.push(last);
-                  return next;
-                });
-              }
-            } catch {
-              // skip malformed line
-            }
-          }
-        }
-        if (buffer.trim()) {
-          try {
-            const data = JSON.parse(buffer) as { type: string; text?: string; sources?: Source[] };
-            if (data.type === "delta" && typeof data.text === "string") {
-              setMessages((prev) => {
-                const next = prev.slice(0, -1);
-                const last = prev[prev.length - 1];
-                if (last?.role === "model") next.push({ ...last, content: last.content + data.text });
-                else next.push(last);
-                return next;
-              });
-            }
-            if (data.type === "sources" && Array.isArray(data.sources)) sources = data.sources;
-            if (data.type === "done") {
-              setMessages((prev) => {
-                const next = prev.slice(0, -1);
-                const last = prev[prev.length - 1];
-                if (last?.role === "model") next.push({ ...last, sources });
-                else next.push(last);
-                return next;
-              });
-            }
-          } catch {
-            // skip
-          }
-        }
-        setIsLoading(false);
-        return;
-      }
 
       const text = await res.text();
       let data: { error?: string; answer?: string; sources?: Source[] } = {};
@@ -430,6 +356,7 @@ export default function App() {
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
+                  ref={inputRef}
                   placeholder={messages.length > 0 ? "답변에 대해 더 궁금한 점이 있나요?" : "무엇이든 물어보세요..."}
                   className="w-full pl-12 sm:pl-14 pr-14 sm:pr-16 py-4 sm:py-5 bg-[#F5F5F0] border border-[#141414]/10 rounded-xl sm:rounded-2xl outline-none transition-colors text-base sm:text-lg focus:border-[#141414]/30 min-h-[48px]"
                   style={{ fontSize: '16px' }}
@@ -476,15 +403,18 @@ export default function App() {
             </motion.div>
           </div>
 
-          {/* Loading State */}
+          {/* Loading skeleton (answer card shape) */}
           {isLoading && (
-            <div className="flex flex-col items-center justify-center py-8 sm:py-12 gap-4 sm:gap-6">
-              <div className="w-12 h-12 rounded-full bg-[#141414]/5 flex items-center justify-center">
-                <Loader2 className="animate-spin text-[#141414] opacity-60" size={24} />
+            <div className="w-full flex flex-col gap-4">
+              <div className="border border-[#141414] rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-white shadow-[20px_20px_0px_0px_rgba(20,20,20,0.05)]">
+                <div className="space-y-3 animate-pulse">
+                  <div className="h-4 bg-[#141414]/10 rounded w-full" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[95%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[88%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[70%]" />
+                  <div className="h-4 bg-[#141414]/10 rounded w-[40%] mt-4" />
+                </div>
               </div>
-              <p className="font-mono text-[10px] uppercase tracking-widest opacity-40 animate-pulse">
-                Thinking...
-              </p>
             </div>
           )}
 
