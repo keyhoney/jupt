@@ -476,18 +476,15 @@ export default function App() {
             </motion.div>
           </div>
 
-          {/* Loading skeleton (answer card shape); hide when streaming into placeholder message */}
-          {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== 'model' || messages[messages.length - 1]?.content !== '') && (
-            <div className="w-full flex flex-col gap-4">
-              <div className="border border-[#141414] rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-12 bg-white shadow-[20px_20px_0px_0px_rgba(20,20,20,0.05)]">
-                <div className="space-y-3 animate-pulse">
-                  <div className="h-4 bg-[#141414]/10 rounded w-full" />
-                  <div className="h-4 bg-[#141414]/10 rounded w-[95%]" />
-                  <div className="h-4 bg-[#141414]/10 rounded w-[88%]" />
-                  <div className="h-4 bg-[#141414]/10 rounded w-[70%]" />
-                  <div className="h-4 bg-[#141414]/10 rounded w-[40%] mt-4" />
-                </div>
+          {/* Loading State */}
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-8 sm:py-12 gap-4 sm:gap-6">
+              <div className="w-12 h-12 rounded-full bg-[#141414]/5 flex items-center justify-center">
+                <Loader2 className="animate-spin text-[#141414] opacity-60" size={24} />
               </div>
+              <p className="font-mono text-[10px] uppercase tracking-widest opacity-40 animate-pulse">
+                Thinking...
+              </p>
             </div>
           )}
 
