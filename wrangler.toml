@@ -1,0 +1,10 @@
+# Cloudflare Pages 로컬/배포 설정
+# 로컬: .dev.vars 에 GEMINI_API_KEY=실제키 로 두면 이 값을 덮어씁니다.
+# 배포: 대시보드 Environment variables 에서 설정하세요.
+name = "gemini-search-engine"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-01-01"
+
+[vars]
+# 배포 시 대시보드에서 설정. 로컬에서는 .dev.vars 가 이 값을 덮어씀.
+GEMINI_API_KEY = ""
