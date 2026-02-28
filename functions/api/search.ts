@@ -3,9 +3,10 @@
  * Cloudflare 대시보드에서 GEMINI_API_KEY를 환경 변수(암호)로 설정하세요.
  */
 
-const GEMINI_MODEL = "gemini-3-flash-preview";
-const GEMINI_URL = (key: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+const MODEL_DEFAULT = "gemini-3-flash-preview";
+const MODEL_WITH_WEB_SEARCH = "gemini-2.5-flash";
+const GEMINI_URL = (key: string, useWebSearch: boolean) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:generateContent?key=${key}`;
 
 export interface Env {
   GEMINI_API_KEY: string;
@@ -67,7 +68,7 @@ export const onRequestPost = async (context: Context) => {
   }
 
   try {
-    const res = await fetch(GEMINI_URL(apiKey), {
+    const res = await fetch(GEMINI_URL(apiKey, useWebSearch), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),

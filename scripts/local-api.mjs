@@ -38,9 +38,10 @@ Object.entries(devVars).forEach(([k, v]) => {
   if (!process.env[k]) process.env[k] = v;
 });
 
-const GEMINI_MODEL = "gemini-3-flash-preview";
-const GEMINI_URL = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+const MODEL_DEFAULT = "gemini-3-flash-preview";
+const MODEL_WITH_WEB_SEARCH = "gemini-2.5-flash";
+const GEMINI_URL = (key, useWebSearch) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${useWebSearch ? MODEL_WITH_WEB_SEARCH : MODEL_DEFAULT}:generateContent?key=${key}`;
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -69,7 +70,7 @@ app.post("/api/search", async (req, res) => {
   if (useWebSearch) requestBody.tools = [{ google_search: {} }];
 
   try {
-    const r = await fetch(GEMINI_URL(apiKey), {
+    const r = await fetch(GEMINI_URL(apiKey, Boolean(useWebSearch)), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
